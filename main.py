@@ -11,6 +11,24 @@ BATCH_SIZE = 10
 NORMALISATION = 'RELU'
 
 
+def load_model(file_path, inputs=None, labels=None):
+    print("Loading model...")
+
+    with open(file_path + 'details.json', 'r') as f:
+        details = json.load(f)
+
+    weights = []
+    biases = []
+
+    for i in range(len(details['structure']) - 1):
+        weights.append(np.load(file_path + f'weight/{i}.npy'))
+        biases.append(np.load(file_path + f'bias/{i}.npy'))
+
+    print("Model loaded\n")
+
+    return network(details['structure'], inputs, labels, weights=weights, biases=biases)
+
+
 class network():
     def __init__(self, structure, inputs, labels, weights=None, biases=None):
         self.structure = structure
@@ -25,9 +43,10 @@ class network():
         else:
             self.biases = biases
 
-        self.inputs = inputs
-        self.labels = labels
-        self.m = inputs.shape[1]
+        if inputs and labels: 
+            self.inputs = inputs
+            self.m = inputs.shape[1]
+            self.labels = labels
 
 
     def ReLU(self, x):
@@ -77,6 +96,7 @@ class network():
             bi = self.biases[i]
 
             z = Wi.dot(a) + bi
+
             if (i < len(self.weights) - 1):
                 adash = self.normalise(z)
             else:
@@ -173,6 +193,11 @@ class network():
         predictions = self.get_prediction(A[-1])
         accuracy = self.get_accuracy(predictions, self.labels)
         print(f"{predictions} {self.labels} | {accuracy * 100:.2f}%")
+
+
+    def predict(self, X):
+        _, A = self.forward_prop(X)
+        return self.get_prediction(A[-1])
 
 
 

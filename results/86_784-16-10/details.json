@@ -1,0 +1,12 @@
+{
+    "accuracy": 0.8631,
+    "structure": [
+        784,
+        16,
+        10
+    ],
+    "normalisation": "RELU",
+    "NABLA": 0.1,
+    "iterations": 500,
+    "batch_size": 10
+}
