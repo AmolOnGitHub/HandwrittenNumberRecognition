@@ -2,9 +2,9 @@ import load_mnist
 import main as network
 
 import numpy as np
-import json
 
-model = 'results/89_784-16-16-10/'
+
+model = 'results/ideal/'
 
 print("Loading data...")
 

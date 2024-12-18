@@ -1,18 +1,56 @@
 import load_mnist
 
 import numpy as np
-import random
+from scipy.ndimage import shift, rotate, zoom
 import os
 import json
 
 
-NABLA = 0.2
+NABLA = 0.1
 BATCH_SIZE = 10
 NORMALISATION = 'RELU'
 
+def augment_data(images, image_size=(28, 28)):
+    ## Augment the data by shifting, rotating and zooming the images
+
+    print("\nAugmenting data...")
+    augmented_images = []
+    
+    for img in images:
+        img = img.reshape(image_size)
+
+        # Random shifts
+
+        shifted_img = shift(img, shift=(np.random.randint(-2, 3), np.random.randint(-2, 3)), mode='constant')
+        rotated_img = rotate(shifted_img, angle=np.random.uniform(-15, 15), reshape=False, mode='constant')
+        zoom_factor = np.random.uniform(0.9, 1.1)
+        zoomed_img = zoom(rotated_img, zoom_factor)
+
+
+        # Fit back to 28x28
+
+        h, w = zoomed_img.shape
+        cropped_img = np.zeros(image_size)
+        
+        min_h = min(h, image_size[0])
+        min_w = min(w, image_size[1])
+
+        start_h = (h - min_h) // 2
+        start_w = (w - min_w) // 2
+
+        cropped_img[:min_h, :min_w] = zoomed_img[start_h:start_h + min_h, start_w:start_w + min_w]
+
+        augmented_images.append(cropped_img.flatten())
+
+
+    print("Data augmented\n")
+    return np.array(augmented_images)
+
 
 def load_model(file_path, inputs=None, labels=None):
-    print("Loading model...")
+    ## Load a model from the given file path
+
+    print("\nLoading model...")
 
     with open(file_path + 'details.json', 'r') as f:
         details = json.load(f)
@@ -31,6 +69,8 @@ def load_model(file_path, inputs=None, labels=None):
 
 class network():
     def __init__(self, structure, inputs, labels, weights=None, biases=None):
+        ## Initialise the network with the given structure, weights and biases
+
         self.structure = structure
 
         if weights is None:
@@ -43,7 +83,7 @@ class network():
         else:
             self.biases = biases
 
-        if inputs and labels: 
+        if inputs is not None and labels is not None: 
             self.inputs = inputs
             self.m = inputs.shape[1]
             self.labels = labels
@@ -53,39 +93,17 @@ class network():
         return np.maximum(0, x)
     
 
-    def sigmoid(self, x):
-        return 1 / (1 + np.exp(-x))
-    
-
     def ReLU_derivative(self, x):
         return x > 0
-    
-
-    def sigmoid_derivative(self, x):
-        return self.sigmoid(x) * (1 - self.sigmoid(x))
     
 
     def softmax(self, x):
         return np.exp(x) / np.sum(np.exp(x), axis=0)
 
 
-    def normalise(self, x):
-        if NORMALISATION == 'RELU':
-            return self.ReLU(x)
-        else:
-            return self.sigmoid(x)
-
-
-    def normalise_derivative(self, x):
-        if NORMALISATION == 'RELU':
-            return self.ReLU_derivative(x)
-        else:
-            return self.sigmoid_derivative(x)
-
-
     def forward_prop(self, X):
-        # Takes in matrix X of shape (n, m) where n is the number of features and m is the number of samples
-        # n here should match the number of input neurons, i.e. structure[0]
+        ## Takes in matrix X of shape (n, m) where n is the number of features and m is the number of samples
+        ## n here should match the number of input neurons, i.e. structure[0]
 
         a = X
         A = [a]
@@ -98,7 +116,7 @@ class network():
             z = Wi.dot(a) + bi
 
             if (i < len(self.weights) - 1):
-                adash = self.normalise(z)
+                adash = self.ReLU(z)
             else:
                 adash = self.softmax(z)
             
@@ -111,7 +129,7 @@ class network():
     
 
     def backward_prop(self, Z, A, Y):
-        # Calculate the derivative of the cost function with respect to the weights and biases
+        ## Calculate the derivative of the cost function with respect to the weights and biases
 
         hot = np.zeros((Y.max() + 1, self.m))
         hot[Y, np.arange(self.m)] = 1
@@ -126,7 +144,7 @@ class network():
             db = 1 / self.m * np.sum(dz)
 
             if (i > 0):
-                dzdash = self.weights[i].T.dot(dz) * self.normalise_derivative(Z[i])
+                dzdash = self.weights[i].T.dot(dz) * self.ReLU_derivative(Z[i])
                 dz = dzdash
 
             dW.insert(0, dw)
@@ -141,25 +159,52 @@ class network():
 
 
     def get_prediction(self, probabilities):
+        ## Get the prediction from the probabilities using argmax
+
         return np.argmax(probabilities, 0);
 
 
     def get_accuracy(self, predictions, Y):
+        ## Get the accuracy of the model
+        
         return np.sum(predictions == Y) / self.m
 
 
     def gradient_descent(self, iterations, save=False):
-        for i in range(iterations):
+        ## Perform gradient descent on the network
+
+        for i in range(1, iterations + 1):
+            # Shuffle the data
+
+            shuffled_indices = np.random.permutation(self.m)
+            self.inputs = self.inputs[:, shuffled_indices]
+            self.labels = self.labels[shuffled_indices]
+
+            
+            # Forward propagate to get activations, then back propagate to get gradient and update weights and biases
+
             Z, A = self.forward_prop(self.inputs)
             self.backward_prop(Z, A, self.labels)
+
 
             if (i % BATCH_SIZE == 0):
                 predictions = self.get_prediction(A[-1])
                 accuracy = self.get_accuracy(predictions, self.labels)
-                print(f"{i} | {predictions} {self.labels} {accuracy}")
+                print(f"{i} | Accuracy: {accuracy * 100:.2f}%")
+
+
+            # Augment data every quarter of the iterations
+
+            if i % (iterations / 4) == 0:
+                aug_data = augment_data(self.inputs.T).T
+                self.inputs = np.concatenate((self.inputs, aug_data), axis=1)
+                self.labels = np.concatenate((self.labels, self.labels), axis=0)
+                self.m = self.inputs.shape[1]
 
 
         if save:
+            # Save model
+
             source_dest = f'results/{accuracy * 100:.0f}_{'-'.join(map(str, self.structure))}/'
 
             if not os.path.exists(source_dest):
@@ -174,9 +219,9 @@ class network():
                 "iterations": iterations,
                 "batch_size": BATCH_SIZE
             }
+
             with open(source_dest + 'details.json', 'w') as f:
                 json.dump(details, f, indent=4)
-
 
             for i, weight in enumerate(self.weights):
                 np.save(f'{source_dest}/weight/{i}.npy', weight)
@@ -189,6 +234,8 @@ class network():
     
 
     def test(self):
+        ## Test the model on the the given inputs
+
         _, A = self.forward_prop(self.inputs)
         predictions = self.get_prediction(A[-1])
         accuracy = self.get_accuracy(predictions, self.labels)
@@ -196,8 +243,10 @@ class network():
 
 
     def predict(self, X):
+        ## Given an input X, predict the output
+
         _, A = self.forward_prop(X)
-        return self.get_prediction(A[-1])
+        return A[-1], self.get_prediction(A[-1])
 
 
 
@@ -207,5 +256,5 @@ if __name__ == '__main__':
     im, lb = data.get_training_data()
     inp = np.array([img.flatten() / 255 for img in im]).T
 
-    nn = network([784, 16, 16, 10], inp, lb)
-    nn.gradient_descent(500, save=True)
+    nn = network([784, 100, 32, 16, 10], inp, lb)
+    nn.gradient_descent(10000, save=True)
